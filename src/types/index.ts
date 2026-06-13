@@ -105,6 +105,30 @@ export const DEFAULT_WEIGHTS: AlgorithmWeights = {
   updatedAt: Date.now(),
 };
 
+export interface FloorWaitStats {
+  floor: number;
+  avgWaitTime: number;
+  minWaitTime: number;
+  maxWaitTime: number;
+  count: number;
+}
+
+export interface AccuracyStats {
+  overallAccuracy: number;
+  overallLevel: "high" | "medium" | "low";
+  totalRecords: number;
+  periodAccuracies: {
+    timePeriod: TimePeriod;
+    accuracy: number;
+    level: "high" | "medium" | "low";
+    count: number;
+  }[];
+  accuracyTrend: "improving" | "stable" | "declining";
+  highAccuracyCount: number;
+  mediumAccuracyCount: number;
+  lowAccuracyCount: number;
+}
+
 export const STORAGE_KEYS = {
   RECORDS: "elevator_prediction_records",
   WEIGHTS: "elevator_algorithm_weights",

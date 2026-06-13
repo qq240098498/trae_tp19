@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   Sunrise,
   Sun,
@@ -19,8 +19,11 @@ import {
   Brain,
   AlertTriangle,
   Check,
-  X,
   History,
+  BarChart3,
+  Target,
+  TrendingDown,
+  Minus as TrendingFlat,
 } from 'lucide-react';
 import { usePredictionStore } from '@/hooks/usePredictionStore';
 import {
@@ -28,7 +31,7 @@ import {
   TIME_PERIOD_HOURS,
   TimePeriod,
 } from '@/types';
-import { formatTime, calculateAccuracy, getAccuracyLevel } from '@/utils/predictor';
+import { formatTime, calculateAccuracy, getAccuracyLevel, calculateFloorWaitStats, calculateAccuracyStats } from '@/utils/predictor';
 import { clsx } from 'clsx';
 
 export default function Home() {
@@ -97,6 +100,27 @@ export default function Home() {
   ];
 
   const recentRecords = records.slice(0, 5);
+
+  const floorWaitStats = useMemo(
+    () => calculateFloorWaitStats(records),
+    [records]
+  );
+
+  const accuracyStats = useMemo(
+    () => calculateAccuracyStats(records),
+    [records]
+  );
+
+  const maxAvgWait = useMemo(() => {
+    if (floorWaitStats.length === 0) return 1;
+    return Math.max(...floorWaitStats.map((s) => s.avgWaitTime), 1);
+  }, [floorWaitStats]);
+
+  const TrendIcon = accuracyStats.accuracyTrend === 'improving'
+    ? TrendingUp
+    : accuracyStats.accuracyTrend === 'declining'
+    ? TrendingDown
+    : TrendingFlat;
 
   return (
     <div className="min-h-screen relative z-10 pb-12">
@@ -696,6 +720,191 @@ export default function Home() {
                 </span>
               </div>
             )}
+          </div>
+        )}
+
+        {records.filter((r) => r.actualSeconds !== null).length > 0 && (
+          <div className="glass-card p-6 mt-6">
+            <div className="flex items-center gap-3 mb-6">
+              <BarChart3 className="w-6 h-6 text-ember" />
+              <h2 className="text-xl font-display font-semibold text-slate-100">
+                统计报表
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Building2 className="w-5 h-5 text-ember-light" />
+                  <h3 className="text-lg font-display font-semibold text-slate-200">
+                    楼层等待时间统计
+                  </h3>
+                </div>
+                <div className="stats-table-wrapper">
+                  <table className="stats-table">
+                    <thead>
+                      <tr>
+                        <th>楼层</th>
+                        <th>平均等待</th>
+                        <th>最短</th>
+                        <th>最长</th>
+                        <th>次数</th>
+                        <th>分布</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {floorWaitStats.map((stat) => (
+                        <tr key={stat.floor}>
+                          <td className="font-semibold text-ember-light">{stat.floor}F</td>
+                          <td className="font-semibold">{formatTime(stat.avgWaitTime)}</td>
+                          <td className="text-mint">{formatTime(stat.minWaitTime)}</td>
+                          <td className="text-coral">{formatTime(stat.maxWaitTime)}</td>
+                          <td>{stat.count}次</td>
+                          <td className="w-28">
+                            <div className="stats-bar-bg">
+                              <div
+                                className="stats-bar-fill"
+                                style={{ width: `${(stat.avgWaitTime / maxAvgWait) * 100}%` }}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Target className="w-5 h-5 text-ember-light" />
+                  <h3 className="text-lg font-display font-semibold text-slate-200">
+                    电梯预测准确率
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-5">
+                  <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                    <div className={clsx(
+                      'text-4xl font-display font-bold',
+                      accuracyStats.overallLevel === 'high' && 'text-mint',
+                      accuracyStats.overallLevel === 'medium' && 'text-ember-light',
+                      accuracyStats.overallLevel === 'low' && 'text-coral'
+                    )}>
+                      {accuracyStats.overallAccuracy}%
+                    </div>
+                    <div className="text-sm text-slate-400 mt-1">总体准确率</div>
+                  </div>
+                  <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                    <div className="flex items-center justify-center gap-2">
+                      <TrendIcon className={clsx(
+                        'w-6 h-6',
+                        accuracyStats.accuracyTrend === 'improving' && 'text-mint',
+                        accuracyStats.accuracyTrend === 'declining' && 'text-coral',
+                        accuracyStats.accuracyTrend === 'stable' && 'text-slate-400'
+                      )} />
+                      <span className={clsx(
+                        'text-lg font-semibold',
+                        accuracyStats.accuracyTrend === 'improving' && 'text-mint',
+                        accuracyStats.accuracyTrend === 'declining' && 'text-coral',
+                        accuracyStats.accuracyTrend === 'stable' && 'text-slate-400'
+                      )}>
+                        {accuracyStats.accuracyTrend === 'improving' ? '上升' : accuracyStats.accuracyTrend === 'declining' ? '下降' : '稳定'}
+                      </span>
+                    </div>
+                    <div className="text-sm text-slate-400 mt-1">准确率趋势</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 mb-4">
+                  <div className="text-sm text-slate-400 mb-3">准确率分布</div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="w-2 h-2 rounded-full bg-mint" />
+                        <span className="text-xs text-slate-400">高 (≥80%)</span>
+                        <span className="text-xs font-semibold text-mint ml-auto">{accuracyStats.highAccuracyCount}次</span>
+                      </div>
+                      <div className="stats-bar-bg">
+                        <div
+                          className="stats-bar-fill bg-mint"
+                          style={{ width: `${accuracyStats.totalRecords > 0 ? (accuracyStats.highAccuracyCount / accuracyStats.totalRecords) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="w-2 h-2 rounded-full bg-ember-light" />
+                        <span className="text-xs text-slate-400">中 (50-79%)</span>
+                        <span className="text-xs font-semibold text-ember-light ml-auto">{accuracyStats.mediumAccuracyCount}次</span>
+                      </div>
+                      <div className="stats-bar-bg">
+                        <div
+                          className="stats-bar-fill bg-ember-light"
+                          style={{ width: `${accuracyStats.totalRecords > 0 ? (accuracyStats.mediumAccuracyCount / accuracyStats.totalRecords) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="w-2 h-2 rounded-full bg-coral" />
+                        <span className="text-xs text-slate-400">低 (&lt;50%)</span>
+                        <span className="text-xs font-semibold text-coral ml-auto">{accuracyStats.lowAccuracyCount}次</span>
+                      </div>
+                      <div className="stats-bar-bg">
+                        <div
+                          className="stats-bar-fill bg-coral"
+                          style={{ width: `${accuracyStats.totalRecords > 0 ? (accuracyStats.lowAccuracyCount / accuracyStats.totalRecords) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {accuracyStats.periodAccuracies.length > 0 && (
+                  <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+                    <div className="text-sm text-slate-400 mb-3">各时段准确率</div>
+                    <div className="space-y-3">
+                      {accuracyStats.periodAccuracies.map((pa) => (
+                        <div key={pa.timePeriod} className="flex items-center gap-3">
+                          <span className="text-sm text-slate-300 w-16 shrink-0">
+                            {TIME_PERIOD_LABELS[pa.timePeriod]}
+                          </span>
+                          <div className="flex-1">
+                            <div className="stats-bar-bg">
+                              <div
+                                className={clsx(
+                                  'stats-bar-fill',
+                                  pa.level === 'high' && 'bg-mint',
+                                  pa.level === 'medium' && 'bg-ember-light',
+                                  pa.level === 'low' && 'bg-coral'
+                                )}
+                                style={{ width: `${pa.accuracy}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className={clsx(
+                            'text-sm font-semibold w-12 text-right shrink-0',
+                            pa.level === 'high' && 'text-mint',
+                            pa.level === 'medium' && 'text-ember-light',
+                            pa.level === 'low' && 'text-coral'
+                          )}>
+                            {pa.accuracy}%
+                          </span>
+                          <span className="text-xs text-slate-500 w-12 text-right shrink-0">
+                            {pa.count}次
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

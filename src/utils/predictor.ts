@@ -8,6 +8,8 @@ import type {
   FailureAlert,
   PersonalizedCurveData,
   TimePeriod,
+  FloorWaitStats,
+  AccuracyStats,
 } from "@/types";
 import { DEFAULT_WEIGHTS } from "@/types";
 
@@ -311,5 +313,117 @@ export function predictWithPersonalizedCurve(
       periodMultiplier: weights.periodMultipliers[timePeriod] ?? 1.0,
       historicalMultiplier: 1.0,
     },
+  };
+}
+
+export function calculateFloorWaitStats(
+  records: PredictionRecord[]
+): FloorWaitStats[] {
+  const validRecords = records.filter((r) => r.actualSeconds !== null);
+
+  const floorMap = new Map<number, number[]>();
+  validRecords.forEach((r) => {
+    const floor = r.currentFloor;
+    if (!floorMap.has(floor)) {
+      floorMap.set(floor, []);
+    }
+    floorMap.get(floor)!.push(r.actualSeconds!);
+  });
+
+  const stats: FloorWaitStats[] = [];
+  floorMap.forEach((times, floor) => {
+    const avg = times.reduce((a, b) => a + b, 0) / times.length;
+    stats.push({
+      floor,
+      avgWaitTime: Math.round(avg),
+      minWaitTime: Math.min(...times),
+      maxWaitTime: Math.max(...times),
+      count: times.length,
+    });
+  });
+
+  return stats.sort((a, b) => a.floor - b.floor);
+}
+
+export function calculateAccuracyStats(
+  records: PredictionRecord[]
+): AccuracyStats {
+  const validRecords = records.filter(
+    (r) => r.actualSeconds !== null && r.predictedSeconds > 0
+  );
+
+  if (validRecords.length === 0) {
+    return {
+      overallAccuracy: 0,
+      overallLevel: "low",
+      totalRecords: 0,
+      periodAccuracies: [],
+      accuracyTrend: "stable",
+      highAccuracyCount: 0,
+      mediumAccuracyCount: 0,
+      lowAccuracyCount: 0,
+    };
+  }
+
+  const accuracies = validRecords.map((r) =>
+    calculateAccuracy(r.predictedSeconds, r.actualSeconds!)
+  );
+
+  const overallAccuracy = Math.round(
+    accuracies.reduce((a, b) => a + b, 0) / accuracies.length
+  );
+
+  const highAccuracyCount = accuracies.filter((a) => a >= 80).length;
+  const mediumAccuracyCount = accuracies.filter((a) => a >= 50 && a < 80).length;
+  const lowAccuracyCount = accuracies.filter((a) => a < 50).length;
+
+  const periods: TimePeriod[] = ["morning", "noon", "evening", "other"];
+  const periodAccuracies = periods
+    .map((period) => {
+      const periodRecords = validRecords.filter((r) => r.timePeriod === period);
+      if (periodRecords.length === 0) return null;
+      const periodAccList = periodRecords.map((r) =>
+        calculateAccuracy(r.predictedSeconds, r.actualSeconds!)
+      );
+      const avg = Math.round(
+        periodAccList.reduce((a, b) => a + b, 0) / periodAccList.length
+      );
+      return {
+        timePeriod: period,
+        accuracy: avg,
+        level: getAccuracyLevel(avg) as "high" | "medium" | "low",
+        count: periodRecords.length,
+      };
+    })
+    .filter(Boolean) as AccuracyStats["periodAccuracies"];
+
+  let accuracyTrend: "improving" | "stable" | "declining" = "stable";
+  if (validRecords.length >= 6) {
+    const half = Math.floor(validRecords.length / 2);
+    const olderRecords = validRecords.slice(half);
+    const newerRecords = validRecords.slice(0, half);
+    const olderAvg =
+      olderRecords.reduce(
+        (sum, r) => sum + calculateAccuracy(r.predictedSeconds, r.actualSeconds!),
+        0
+      ) / olderRecords.length;
+    const newerAvg =
+      newerRecords.reduce(
+        (sum, r) => sum + calculateAccuracy(r.predictedSeconds, r.actualSeconds!),
+        0
+      ) / newerRecords.length;
+    if (newerAvg - olderAvg > 5) accuracyTrend = "improving";
+    else if (olderAvg - newerAvg > 5) accuracyTrend = "declining";
+  }
+
+  return {
+    overallAccuracy,
+    overallLevel: getAccuracyLevel(overallAccuracy) as "high" | "medium" | "low",
+    totalRecords: validRecords.length,
+    periodAccuracies,
+    accuracyTrend,
+    highAccuracyCount,
+    mediumAccuracyCount,
+    lowAccuracyCount,
   };
 }

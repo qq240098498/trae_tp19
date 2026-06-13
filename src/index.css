@@ -273,4 +273,58 @@
     color: #ef4a5e;
     border: 1px solid rgba(231, 29, 54, 0.3);
   }
+
+  .stats-table-wrapper {
+    overflow-x: auto;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .stats-table thead {
+    background: rgba(255, 107, 53, 0.1);
+  }
+
+  .stats-table th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: #f7c59f;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: nowrap;
+  }
+
+  .stats-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: #e2e8f0;
+  }
+
+  .stats-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .stats-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .stats-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+
+  .stats-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff6b35 0%, #f7c59f 100%);
+    border-radius: 9999px;
+    transition: width 0.5s ease;
+  }
 }
