@@ -24,14 +24,21 @@ import {
   Target,
   TrendingDown,
   Minus as TrendingFlat,
+  Calendar,
+  Layers,
+  RefreshCw,
+  Filter,
 } from 'lucide-react';
 import { usePredictionStore } from '@/hooks/usePredictionStore';
 import {
   TIME_PERIOD_LABELS,
   TIME_PERIOD_HOURS,
   TimePeriod,
+  DAY_TYPE_LABELS,
+  TIME_PERIOD_FILTER_LABELS,
+  DayType,
 } from '@/types';
-import { formatTime, calculateAccuracy, getAccuracyLevel, calculateFloorWaitStats, calculateAccuracyStats } from '@/utils/predictor';
+import { formatTime, calculateAccuracy, getAccuracyLevel, calculateFilteredFloorWaitStats, calculateFilteredAccuracyStats } from '@/utils/predictor';
 import { clsx } from 'clsx';
 
 export default function Home() {
@@ -47,6 +54,7 @@ export default function Home() {
     periodStats,
     personalizedCurve,
     hasSavedActualTime,
+    statsFilter,
     setCurrentFloor,
     setTotalFloors,
     setTimePeriod,
@@ -60,6 +68,8 @@ export default function Home() {
     setManualInputSeconds,
     saveManualTime,
     updateFailureAlert,
+    setStatsFilter,
+    resetStatsFilter,
   } = usePredictionStore();
 
   useEffect(() => {
@@ -102,14 +112,29 @@ export default function Home() {
   const recentRecords = records.slice(0, 5);
 
   const floorWaitStats = useMemo(
-    () => calculateFloorWaitStats(records),
-    [records]
+    () => calculateFilteredFloorWaitStats(records, statsFilter),
+    [records, statsFilter]
   );
 
   const accuracyStats = useMemo(
-    () => calculateAccuracyStats(records),
-    [records]
+    () => calculateFilteredAccuracyStats(records, statsFilter),
+    [records, statsFilter]
   );
+
+  const filteredRecordsCount = useMemo(() => {
+    return floorWaitStats.reduce((sum, s) => sum + s.count, 0);
+  }, [floorWaitStats]);
+
+  const hasActiveFilters = useMemo(() => {
+    return (
+      statsFilter.dateRange.start !== null ||
+      statsFilter.dateRange.end !== null ||
+      statsFilter.floorRange.min !== null ||
+      statsFilter.floorRange.max !== null ||
+      statsFilter.dayType !== "all" ||
+      statsFilter.timePeriod !== "all"
+    );
+  }, [statsFilter]);
 
   const maxAvgWait = useMemo(() => {
     if (floorWaitStats.length === 0) return 1;
@@ -725,11 +750,132 @@ export default function Home() {
 
         {records.filter((r) => r.actualSeconds !== null).length > 0 && (
           <div className="glass-card p-6 mt-6">
-            <div className="flex items-center gap-3 mb-6">
-              <BarChart3 className="w-6 h-6 text-ember" />
-              <h2 className="text-xl font-display font-semibold text-slate-100">
-                统计报表
-              </h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <BarChart3 className="w-6 h-6 text-ember" />
+                <h2 className="text-xl font-display font-semibold text-slate-100">
+                  统计报表
+                </h2>
+              </div>
+              {hasActiveFilters && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-400">
+                    已筛选 {filteredRecordsCount} 条记录
+                  </span>
+                  <button
+                    onClick={resetStatsFilter}
+                    className="flex items-center gap-1 text-sm text-slate-400 hover:text-ember transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    重置
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-800/50 rounded-xl p-5 mb-6 border border-slate-700/50">
+              <div className="flex items-center gap-2 mb-4">
+                <Filter className="w-5 h-5 text-ember-light" />
+                <h3 className="text-lg font-display font-semibold text-slate-200">
+                  筛选条件
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    日期类型
+                  </label>
+                  <select
+                    value={statsFilter.dayType}
+                    onChange={(e) => setStatsFilter({ dayType: e.target.value as DayType })}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-ember transition-colors"
+                  >
+                    {Object.entries(DAY_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    时段
+                  </label>
+                  <select
+                    value={statsFilter.timePeriod}
+                    onChange={(e) => setStatsFilter({ timePeriod: e.target.value as TimePeriod | 'all' })}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-ember transition-colors"
+                  >
+                    {Object.entries(TIME_PERIOD_FILTER_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    开始日期
+                  </label>
+                  <input
+                    type="date"
+                    value={statsFilter.dateRange.start || ''}
+                    onChange={(e) => setStatsFilter({ dateRange: { start: e.target.value || null, end: statsFilter.dateRange.end } })}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-ember transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    结束日期
+                  </label>
+                  <input
+                    type="date"
+                    value={statsFilter.dateRange.end || ''}
+                    onChange={(e) => setStatsFilter({ dateRange: { start: statsFilter.dateRange.start, end: e.target.value || null } })}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-ember transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
+                    <Layers className="w-4 h-4" />
+                    最低楼层
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={totalFloors}
+                    placeholder="不限"
+                    value={statsFilter.floorRange.min ?? ''}
+                    onChange={(e) => setStatsFilter({ floorRange: { min: e.target.value ? parseInt(e.target.value) : null, max: statsFilter.floorRange.max } })}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-ember transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
+                    <Layers className="w-4 h-4" />
+                    最高楼层
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={totalFloors}
+                    placeholder="不限"
+                    value={statsFilter.floorRange.max ?? ''}
+                    onChange={(e) => setStatsFilter({ floorRange: { min: statsFilter.floorRange.min, max: e.target.value ? parseInt(e.target.value) : null } })}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-ember transition-colors"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

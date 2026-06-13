@@ -129,6 +129,49 @@ export interface AccuracyStats {
   lowAccuracyCount: number;
 }
 
+export type DayType = "all" | "weekday" | "weekend" | "holiday";
+
+export interface StatsFilter {
+  dateRange: {
+    start: string | null;
+    end: string | null;
+  };
+  floorRange: {
+    min: number | null;
+    max: number | null;
+  };
+  dayType: DayType;
+  timePeriod: TimePeriod | "all";
+}
+
+export const DEFAULT_STATS_FILTER: StatsFilter = {
+  dateRange: {
+    start: null,
+    end: null,
+  },
+  floorRange: {
+    min: null,
+    max: null,
+  },
+  dayType: "all",
+  timePeriod: "all",
+};
+
+export const DAY_TYPE_LABELS: Record<DayType, string> = {
+  all: "全部",
+  weekday: "工作日",
+  weekend: "周末",
+  holiday: "节假日",
+};
+
+export const TIME_PERIOD_FILTER_LABELS: Record<TimePeriod | "all", string> = {
+  morning: "早高峰",
+  noon: "午间",
+  evening: "晚高峰",
+  other: "其他时段",
+  all: "全部时段",
+};
+
 export const STORAGE_KEYS = {
   RECORDS: "elevator_prediction_records",
   WEIGHTS: "elevator_algorithm_weights",

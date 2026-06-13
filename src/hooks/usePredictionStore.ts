@@ -8,11 +8,13 @@ import type {
   PeriodStats,
   PersonalizedCurveData,
   LearningModeState,
+  StatsFilter,
 } from '@/types';
 import {
   STORAGE_KEYS,
   DEFAULT_WEIGHTS,
   TimePeriod,
+  DEFAULT_STATS_FILTER,
 } from '@/types';
 import {
   predictWaitTime,
@@ -45,6 +47,7 @@ interface PredictionState {
   periodStats: PeriodStats[];
   personalizedCurve: PersonalizedCurveData;
   hasSavedActualTime: boolean;
+  statsFilter: StatsFilter;
   
   setCurrentFloor: (floor: number) => void;
   setTotalFloors: (floors: number) => void;
@@ -62,6 +65,9 @@ interface PredictionState {
   saveManualTime: () => void;
   updateFailureAlert: () => void;
   updatePeriodStats: () => void;
+  
+  setStatsFilter: (filter: Partial<StatsFilter>) => void;
+  resetStatsFilter: () => void;
 }
 
 export const usePredictionStore = create<PredictionState>((set, get) => ({
@@ -96,6 +102,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     trendLine: { slope: DEFAULT_WEIGHTS.secondsPerFloor, intercept: DEFAULT_WEIGHTS.baseWaitTime },
   },
   hasSavedActualTime: false,
+  statsFilter: { ...DEFAULT_STATS_FILTER },
 
   setCurrentFloor: (floor) => {
     set({ currentFloor: Math.max(1, Math.min(floor, get().totalFloors)) });
@@ -347,5 +354,27 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       periodStats: stats,
       personalizedCurve: curve,
     });
+  },
+
+  setStatsFilter: (filter) => {
+    const state = get();
+    set({
+      statsFilter: {
+        ...state.statsFilter,
+        ...filter,
+        dateRange: {
+          ...state.statsFilter.dateRange,
+          ...filter.dateRange,
+        },
+        floorRange: {
+          ...state.statsFilter.floorRange,
+          ...filter.floorRange,
+        },
+      },
+    });
+  },
+
+  resetStatsFilter: () => {
+    set({ statsFilter: { ...DEFAULT_STATS_FILTER } });
   },
 }));

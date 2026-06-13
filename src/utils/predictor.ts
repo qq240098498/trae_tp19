@@ -10,6 +10,8 @@ import type {
   TimePeriod,
   FloorWaitStats,
   AccuracyStats,
+  StatsFilter,
+  DayType,
 } from "@/types";
 import { DEFAULT_WEIGHTS } from "@/types";
 
@@ -317,9 +319,11 @@ export function predictWithPersonalizedCurve(
 }
 
 export function calculateFloorWaitStats(
-  records: PredictionRecord[]
+  records: PredictionRecord[],
+  filter?: StatsFilter
 ): FloorWaitStats[] {
-  const validRecords = records.filter((r) => r.actualSeconds !== null);
+  const filteredRecords = filter ? filterRecords(records, filter) : records;
+  const validRecords = filteredRecords.filter((r) => r.actualSeconds !== null);
 
   const floorMap = new Map<number, number[]>();
   validRecords.forEach((r) => {
@@ -426,4 +430,106 @@ export function calculateAccuracyStats(
     mediumAccuracyCount,
     lowAccuracyCount,
   };
+}
+
+const CHINA_HOLIDAYS_2025_2026: Set<string> = new Set([
+  "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-01", "2025-02-02", "2025-02-03", "2025-02-04",
+  "2025-04-04", "2025-04-05", "2025-04-06",
+  "2025-05-01", "2025-05-02", "2025-05-03", "2025-05-04", "2025-05-05",
+  "2025-05-31", "2025-06-01", "2025-06-02",
+  "2025-10-01", "2025-10-02", "2025-10-03", "2025-10-04", "2025-10-05", "2025-10-06", "2025-10-07", "2025-10-08",
+  "2026-01-01", "2026-01-29", "2026-01-30", "2026-01-31", "2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05",
+  "2026-04-04", "2026-04-05", "2026-04-06",
+  "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05",
+  "2026-06-19", "2026-06-20", "2026-06-21",
+  "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
+]);
+
+export function formatDateKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function isWeekend(timestamp: number): boolean {
+  const day = new Date(timestamp).getDay();
+  return day === 0 || day === 6;
+}
+
+export function isHoliday(timestamp: number): boolean {
+  return CHINA_HOLIDAYS_2025_2026.has(formatDateKey(timestamp));
+}
+
+export function getDayType(timestamp: number): DayType {
+  if (isHoliday(timestamp)) return "holiday";
+  if (isWeekend(timestamp)) return "weekend";
+  return "weekday";
+}
+
+export function filterRecords(
+  records: PredictionRecord[],
+  filter: StatsFilter
+): PredictionRecord[] {
+  return records.filter((record) => {
+    if (filter.timePeriod !== "all" && record.timePeriod !== filter.timePeriod) {
+      return false;
+    }
+
+    if (filter.dayType !== "all") {
+      const recordDayType = getDayType(record.timestamp);
+      if (recordDayType !== filter.dayType) {
+        return false;
+      }
+    }
+
+    if (filter.dateRange.start) {
+      const startDate = new Date(filter.dateRange.start).getTime();
+      if (record.timestamp < startDate) {
+        return false;
+      }
+    }
+
+    if (filter.dateRange.end) {
+      const endDate = new Date(filter.dateRange.end);
+      endDate.setHours(23, 59, 59, 999);
+      if (record.timestamp > endDate.getTime()) {
+        return false;
+      }
+    }
+
+    if (filter.floorRange.min !== null && record.currentFloor < filter.floorRange.min) {
+      return false;
+    }
+
+    if (filter.floorRange.max !== null && record.currentFloor > filter.floorRange.max) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+export function calculateFilteredFloorWaitStats(
+  records: PredictionRecord[],
+  filter: StatsFilter
+): FloorWaitStats[] {
+  const filtered = filterRecords(records, filter);
+  return calculateFloorWaitStats(filtered);
+}
+
+export function calculateFilteredAccuracyStats(
+  records: PredictionRecord[],
+  filter: StatsFilter
+): AccuracyStats {
+  const filtered = filterRecords(records, filter);
+  return calculateAccuracyStats(filtered);
+}
+
+export function formatDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
