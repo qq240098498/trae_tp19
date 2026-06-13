@@ -19,6 +19,42 @@ import type {
 } from "@/types";
 import { DEFAULT_WEIGHTS } from "@/types";
 
+export function calculateAnomalyMultiplier(
+  records: PredictionRecord[],
+  anomalyHandlings: AnomalyHandling[]
+): { multiplier: number; hasReportedAnomaly: boolean; reportedAnomalyCount: number } {
+  const handlingMap = new Map<string, AnomalyHandling>();
+  anomalyHandlings.forEach((h) => handlingMap.set(h.anomalyRecordId, h));
+
+  const validRecords = records.filter(
+    (r) => r.actualSeconds !== null && r.predictedSeconds > 0
+  );
+
+  const reportedAnomalies = validRecords.filter((r) => {
+    const handling = handlingMap.get(r.id);
+    return handling && handling.handlingType === "reported";
+  });
+
+  const reportedAnomalyCount = reportedAnomalies.length;
+
+  if (reportedAnomalyCount === 0) {
+    return { multiplier: 1.0, hasReportedAnomaly: false, reportedAnomalyCount: 0 };
+  }
+
+  let multiplier = 1.0;
+  if (reportedAnomalyCount >= 5) {
+    multiplier = 2.5;
+  } else if (reportedAnomalyCount >= 3) {
+    multiplier = 2.0;
+  } else if (reportedAnomalyCount >= 2) {
+    multiplier = 1.6;
+  } else {
+    multiplier = 1.3;
+  }
+
+  return { multiplier, hasReportedAnomaly: true, reportedAnomalyCount };
+}
+
 export function detectTimePeriod(): PredictionInput["timePeriod"] {
   const hour = new Date().getHours();
   if (hour >= 7 && hour < 10) return "morning";
@@ -57,7 +93,8 @@ export function calculateConfidence(records: PredictionRecord[]): number {
 export function predictWaitTime(
   input: PredictionInput,
   weights: AlgorithmWeights = DEFAULT_WEIGHTS,
-  historicalMultiplier: number = 1.0
+  historicalMultiplier: number = 1.0,
+  anomalyInfo: { multiplier: number; hasReportedAnomaly: boolean; reportedAnomalyCount: number } = { multiplier: 1.0, hasReportedAnomaly: false, reportedAnomalyCount: 0 }
 ): PredictionResult {
   const { currentFloor, totalFloors, timePeriod } = input;
 
@@ -71,7 +108,11 @@ export function predictWaitTime(
   const floorTime = floorDiff * weights.secondsPerFloor;
   const travelTime = (baseTime + floorTime) * periodMultiplier * historicalMultiplier;
 
-  const predictedSeconds = Math.max(5, Math.round(travelTime));
+  let predictedSeconds = Math.max(5, Math.round(travelTime));
+
+  if (anomalyInfo.hasReportedAnomaly) {
+    predictedSeconds = Math.max(5, Math.round(travelTime * anomalyInfo.multiplier));
+  }
 
   let suggestion: Suggestion;
   let suggestionReason: string;
@@ -81,6 +122,15 @@ export function predictWaitTime(
   } else {
     suggestion = "stairs";
     suggestionReason = "等待时间较长，走楼梯更快";
+  }
+
+  if (anomalyInfo.hasReportedAnomaly) {
+    if (suggestion === "elevator") {
+      suggestionReason = `电梯存在${anomalyInfo.reportedAnomalyCount}项已报修异常，等待时间可能延长，建议走楼梯`;
+      suggestion = "stairs";
+    } else {
+      suggestionReason = `电梯存在${anomalyInfo.reportedAnomalyCount}项已报修异常，等待时间较长，建议走楼梯`;
+    }
   }
 
   return {
@@ -263,7 +313,8 @@ export function predictWithPersonalizedCurve(
   input: PredictionInput,
   personalizedCurve: PersonalizedCurveData,
   periodStats: PeriodStats[],
-  weights: AlgorithmWeights = DEFAULT_WEIGHTS
+  weights: AlgorithmWeights = DEFAULT_WEIGHTS,
+  anomalyInfo: { multiplier: number; hasReportedAnomaly: boolean; reportedAnomalyCount: number } = { multiplier: 1.0, hasReportedAnomaly: false, reportedAnomalyCount: 0 }
 ): PredictionResult {
   const { currentFloor, totalFloors, timePeriod } = input;
   const safeCurrent = Math.max(1, Math.min(currentFloor, totalFloors));
@@ -288,6 +339,10 @@ export function predictWithPersonalizedCurve(
     }
   }
 
+  if (anomalyInfo.hasReportedAnomaly) {
+    predictedSeconds = Math.max(5, Math.round(predictedSeconds * anomalyInfo.multiplier));
+  }
+
   let suggestion: Suggestion;
   let suggestionReason: string;
   if (predictedSeconds <= weights.stairsThreshold || floorDiff <= weights.stairsFloorThreshold) {
@@ -296,6 +351,15 @@ export function predictWithPersonalizedCurve(
   } else {
     suggestion = "stairs";
     suggestionReason = "等待时间较长，走楼梯更快";
+  }
+
+  if (anomalyInfo.hasReportedAnomaly) {
+    if (suggestion === "elevator") {
+      suggestionReason = `电梯存在${anomalyInfo.reportedAnomalyCount}项已报修异常，等待时间可能延长，建议走楼梯`;
+      suggestion = "stairs";
+    } else {
+      suggestionReason = `电梯存在${anomalyInfo.reportedAnomalyCount}项已报修异常，等待时间较长，建议走楼梯`;
+    }
   }
 
   const periodStat = periodStats.find((s) => s.timePeriod === timePeriod);

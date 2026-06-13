@@ -29,6 +29,7 @@ import {
   generatePersonalizedCurve,
   predictWithPersonalizedCurve,
   detectElevatorAnomaly,
+  calculateAnomalyMultiplier,
 } from '@/utils/predictor';
 
 interface TimerState {
@@ -154,13 +155,14 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
 
     const periodStats = calculatePeriodStats(state.records);
     const personalizedCurve = generatePersonalizedCurve(state.records, state.timePeriod);
+    const anomalyInfo = calculateAnomalyMultiplier(state.records, state.anomalyHandlings);
     
     let result;
     if (state.learningMode.isEnabled && personalizedCurve.dataPoints.length >= 3) {
-      result = predictWithPersonalizedCurve(input, personalizedCurve, periodStats, state.weights);
+      result = predictWithPersonalizedCurve(input, personalizedCurve, periodStats, state.weights, anomalyInfo);
     } else {
       const historicalMultiplier = calculateHistoricalMultiplier(state.records);
-      result = predictWaitTime(input, state.weights, historicalMultiplier);
+      result = predictWaitTime(input, state.weights, historicalMultiplier, anomalyInfo);
       result.confidence = calculateConfidence(state.records);
     }
 
