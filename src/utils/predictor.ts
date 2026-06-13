@@ -4,6 +4,10 @@ import type {
   PredictionRecord,
   PredictionResult,
   Suggestion,
+  PeriodStats,
+  FailureAlert,
+  PersonalizedCurveData,
+  TimePeriod,
 } from "@/types";
 import { DEFAULT_WEIGHTS } from "@/types";
 
@@ -113,4 +117,199 @@ export function getAccuracyLevel(accuracy: number): "high" | "medium" | "low" {
 
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export function calculatePeriodStats(
+  records: PredictionRecord[],
+  targetTimePeriod?: TimePeriod
+): PeriodStats[] {
+  const periods: TimePeriod[] = ["morning", "noon", "evening", "other"];
+  const filteredRecords = records.filter((r) => r.actualSeconds !== null);
+
+  return periods
+    .filter((p) => !targetTimePeriod || p === targetTimePeriod)
+    .map((period) => {
+      const periodRecords = filteredRecords.filter((r) => r.timePeriod === period);
+
+      if (periodRecords.length === 0) {
+        return {
+          timePeriod: period,
+          avgWaitTime: 0,
+          maxWaitTime: 0,
+          minWaitTime: 0,
+          count: 0,
+          variance: 0,
+        };
+      }
+
+      const actualTimes = periodRecords.map((r) => r.actualSeconds!);
+      const avgWaitTime =
+        actualTimes.reduce((sum, time) => sum + time, 0) / actualTimes.length;
+      const maxWaitTime = Math.max(...actualTimes);
+      const minWaitTime = Math.min(...actualTimes);
+      const variance =
+        actualTimes.reduce((sum, time) => sum + Math.pow(time - avgWaitTime, 2), 0) /
+        actualTimes.length;
+
+      return {
+        timePeriod: period,
+        avgWaitTime: Math.round(avgWaitTime),
+        maxWaitTime,
+        minWaitTime,
+        count: periodRecords.length,
+        variance: Math.round(variance),
+      };
+    });
+}
+
+export function detectFailure(
+  actualSeconds: number,
+  predictedSeconds: number,
+  periodStats: PeriodStats[],
+  timePeriod: TimePeriod
+): FailureAlert {
+  const FAILURE_THRESHOLD_MULTIPLIER = 2.5;
+  const ABSOLUTE_FAILURE_THRESHOLD = 180;
+
+  const periodStat = periodStats.find((s) => s.timePeriod === timePeriod);
+  const periodMaxWait = periodStat?.maxWaitTime || predictedSeconds;
+
+  const exceedsPrediction = actualSeconds >= predictedSeconds * FAILURE_THRESHOLD_MULTIPLIER;
+  const exceedsPeriodMax = periodStat && actualSeconds >= periodMaxWait * 1.8;
+  const exceedsAbsolute = actualSeconds >= ABSOLUTE_FAILURE_THRESHOLD;
+
+  const isFailure = exceedsPrediction || exceedsPeriodMax || exceedsAbsolute;
+
+  if (isFailure) {
+    const thresholdExceeded = Math.max(
+      actualSeconds - predictedSeconds * FAILURE_THRESHOLD_MULTIPLIER,
+      0
+    );
+    return {
+      isActive: true,
+      message: "可能出了故障，建议走楼梯",
+      thresholdExceeded: Math.round(thresholdExceeded),
+      predictedTime: predictedSeconds,
+      actualTime: actualSeconds,
+    };
+  }
+
+  return {
+    isActive: false,
+    message: "",
+    thresholdExceeded: 0,
+    predictedTime: predictedSeconds,
+    actualTime: actualSeconds,
+  };
+}
+
+export function generatePersonalizedCurve(
+  records: PredictionRecord[],
+  timePeriod: TimePeriod
+): PersonalizedCurveData {
+  const validRecords = records.filter(
+    (r) => r.actualSeconds !== null && r.timePeriod === timePeriod
+  );
+
+  if (validRecords.length < 3) {
+    return {
+      timePeriod,
+      dataPoints: [],
+      trendLine: { slope: DEFAULT_WEIGHTS.secondsPerFloor, intercept: DEFAULT_WEIGHTS.baseWaitTime },
+    };
+  }
+
+  const floorDiffs = validRecords.map((r) => {
+    const floorDiff = Math.max(1, Math.min(r.currentFloor - 1, r.totalFloors - r.currentFloor));
+    return floorDiff;
+  });
+  const waitTimes = validRecords.map((r) => r.actualSeconds!);
+
+  const n = floorDiffs.length;
+  const sumX = floorDiffs.reduce((a, b) => a + b, 0);
+  const sumY = waitTimes.reduce((a, b) => a + b, 0);
+  const sumXY = floorDiffs.reduce((sum, x, i) => sum + x * waitTimes[i], 0);
+  const sumX2 = floorDiffs.reduce((sum, x) => sum + x * x, 0);
+
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+
+  const dataPoints = Array.from(new Set(floorDiffs)).map((floorDiff) => {
+    const matchingRecords = validRecords.filter((r) => {
+      const rDiff = Math.max(1, Math.min(r.currentFloor - 1, r.totalFloors - r.currentFloor));
+      return rDiff === floorDiff;
+    });
+    const avgWaitTime =
+      matchingRecords.reduce((sum, r) => sum + (r.actualSeconds || 0), 0) / matchingRecords.length;
+    return { floorDiff, avgWaitTime: Math.round(avgWaitTime) };
+  });
+
+  return {
+    timePeriod,
+    dataPoints: dataPoints.sort((a, b) => a.floorDiff - b.floorDiff),
+    trendLine: { slope: Math.max(0.5, Math.min(5, slope)), intercept: Math.max(2, intercept) },
+  };
+}
+
+export function predictWithPersonalizedCurve(
+  input: PredictionInput,
+  personalizedCurve: PersonalizedCurveData,
+  periodStats: PeriodStats[],
+  weights: AlgorithmWeights = DEFAULT_WEIGHTS
+): PredictionResult {
+  const { currentFloor, totalFloors, timePeriod } = input;
+  const safeCurrent = Math.max(1, Math.min(currentFloor, totalFloors));
+  const safeTotal = Math.max(2, totalFloors);
+  const floorDiff = Math.max(1, Math.min(safeCurrent - 1, safeTotal - safeCurrent));
+
+  let predictedSeconds: number;
+
+  if (personalizedCurve.dataPoints.length > 0) {
+    const { slope, intercept } = personalizedCurve.trendLine;
+    predictedSeconds = Math.max(5, Math.round(slope * floorDiff + intercept));
+  } else {
+    const periodStat = periodStats.find((s) => s.timePeriod === timePeriod);
+    if (periodStat && periodStat.count > 0) {
+      const baseTime = periodStat.avgWaitTime;
+      predictedSeconds = Math.max(5, Math.round(baseTime * (floorDiff / 3)));
+    } else {
+      const periodMultiplier = weights.periodMultipliers[timePeriod] ?? 1.0;
+      const baseTime = weights.baseWaitTime;
+      const floorTime = floorDiff * weights.secondsPerFloor;
+      predictedSeconds = Math.max(5, Math.round((baseTime + floorTime) * periodMultiplier));
+    }
+  }
+
+  let suggestion: Suggestion;
+  let suggestionReason: string;
+  if (predictedSeconds <= weights.stairsThreshold || floorDiff <= weights.stairsFloorThreshold) {
+    suggestion = "elevator";
+    suggestionReason = "等待时间可接受，等电梯更省力";
+  } else {
+    suggestion = "stairs";
+    suggestionReason = "等待时间较长，走楼梯更快";
+  }
+
+  const periodStat = periodStats.find((s) => s.timePeriod === timePeriod);
+  let confidence = 65;
+  if (periodStat) {
+    if (periodStat.count >= 30) confidence = 95;
+    else if (periodStat.count >= 15) confidence = 88;
+    else if (periodStat.count >= 5) confidence = 80;
+    else if (periodStat.count >= 3) confidence = 70;
+  }
+
+  return {
+    predictedSeconds,
+    suggestion,
+    suggestionReason,
+    confidence,
+    floorDiff,
+    breakdown: {
+      baseTime: weights.baseWaitTime,
+      floorTime: floorDiff * weights.secondsPerFloor,
+      periodMultiplier: weights.periodMultipliers[timePeriod] ?? 1.0,
+      historicalMultiplier: 1.0,
+    },
+  };
 }

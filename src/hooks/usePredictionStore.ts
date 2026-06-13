@@ -4,6 +4,10 @@ import type {
   PredictionRecord,
   AlgorithmWeights,
   Suggestion,
+  FailureAlert,
+  PeriodStats,
+  PersonalizedCurveData,
+  LearningModeState,
 } from '@/types';
 import {
   STORAGE_KEYS,
@@ -15,6 +19,10 @@ import {
   calculateHistoricalMultiplier,
   calculateConfidence,
   generateId,
+  calculatePeriodStats,
+  detectFailure,
+  generatePersonalizedCurve,
+  predictWithPersonalizedCurve,
 } from '@/utils/predictor';
 
 interface TimerState {
@@ -32,6 +40,10 @@ interface PredictionState {
   records: PredictionRecord[];
   weights: AlgorithmWeights;
   timer: TimerState;
+  learningMode: LearningModeState;
+  failureAlert: FailureAlert;
+  periodStats: PeriodStats[];
+  personalizedCurve: PersonalizedCurveData;
   
   setCurrentFloor: (floor: number) => void;
   setTotalFloors: (floors: number) => void;
@@ -43,6 +55,12 @@ interface PredictionState {
   clearHistory: () => void;
   loadFromStorage: () => void;
   _saveToStorage: () => void;
+  
+  toggleLearningMode: () => void;
+  setManualInputSeconds: (seconds: number) => void;
+  saveManualTime: () => void;
+  updateFailureAlert: () => void;
+  updatePeriodStats: () => void;
 }
 
 export const usePredictionStore = create<PredictionState>((set, get) => ({
@@ -58,6 +76,24 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     elapsedSeconds: 0,
     intervalId: null,
   },
+  learningMode: {
+    isEnabled: true,
+    manualInputSeconds: 0,
+    showManualInput: false,
+  },
+  failureAlert: {
+    isActive: false,
+    message: '',
+    thresholdExceeded: 0,
+    predictedTime: 0,
+    actualTime: 0,
+  },
+  periodStats: [],
+  personalizedCurve: {
+    timePeriod: 'other',
+    dataPoints: [],
+    trendLine: { slope: DEFAULT_WEIGHTS.secondsPerFloor, intercept: DEFAULT_WEIGHTS.baseWaitTime },
+  },
 
   setCurrentFloor: (floor) => {
     set({ currentFloor: Math.max(1, Math.min(floor, get().totalFloors)) });
@@ -72,6 +108,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
 
   setTimePeriod: (period) => {
     set({ timePeriod: period });
+    get().updatePeriodStats();
   },
 
   predict: () => {
@@ -82,19 +119,29 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       timePeriod: state.timePeriod,
     };
 
-    const historicalMultiplier = calculateHistoricalMultiplier(state.records);
-    const result = predictWaitTime(input, state.weights, historicalMultiplier);
-    const confidence = calculateConfidence(state.records);
+    const periodStats = calculatePeriodStats(state.records);
+    const personalizedCurve = generatePersonalizedCurve(state.records, state.timePeriod);
+    
+    let result;
+    if (state.learningMode.isEnabled && personalizedCurve.dataPoints.length >= 3) {
+      result = predictWithPersonalizedCurve(input, personalizedCurve, periodStats, state.weights);
+    } else {
+      const historicalMultiplier = calculateHistoricalMultiplier(state.records);
+      result = predictWaitTime(input, state.weights, historicalMultiplier);
+      result.confidence = calculateConfidence(state.records);
+    }
 
     set({
       currentPrediction: {
         ...input,
         predictedSeconds: result.predictedSeconds,
-        confidence,
+        confidence: result.confidence,
         suggestion: result.suggestion as Suggestion,
-        suggestionReason: '',
+        suggestionReason: result.suggestionReason,
         floorDiff: result.floorDiff,
       },
+      periodStats,
+      personalizedCurve,
     });
   },
 
@@ -189,5 +236,76 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     } catch (error) {
       console.error('Failed to save to storage:', error);
     }
+  },
+
+  toggleLearningMode: () => {
+    set((state) => ({
+      learningMode: {
+        ...state.learningMode,
+        isEnabled: !state.learningMode.isEnabled,
+      },
+    }));
+  },
+
+  setManualInputSeconds: (seconds) => {
+    set((state) => ({
+      learningMode: {
+        ...state.learningMode,
+        manualInputSeconds: Math.max(0, seconds),
+      },
+    }));
+  },
+
+  saveManualTime: () => {
+    const state = get();
+    if (!state.currentPrediction) return;
+
+    const record: PredictionRecord = {
+      id: generateId(),
+      currentFloor: state.currentPrediction.currentFloor,
+      totalFloors: state.currentPrediction.totalFloors,
+      timePeriod: state.currentPrediction.timePeriod,
+      predictedSeconds: state.currentPrediction.predictedSeconds ?? 0,
+      actualSeconds: state.learningMode.manualInputSeconds,
+      suggestion: state.currentPrediction.suggestion as Suggestion,
+      timestamp: Date.now(),
+      isManualInput: true,
+    };
+
+    const updatedRecords = [record, ...state.records].slice(0, 50);
+    set({ records: updatedRecords });
+    get()._saveToStorage();
+    get().updatePeriodStats();
+
+    set((state) => ({
+      learningMode: {
+        ...state.learningMode,
+        manualInputSeconds: 0,
+        showManualInput: false,
+      },
+    }));
+  },
+
+  updateFailureAlert: () => {
+    const state = get();
+    if (!state.currentPrediction || !state.timer.isRunning) return;
+
+    const alert = detectFailure(
+      state.timer.elapsedSeconds,
+      state.currentPrediction.predictedSeconds ?? 0,
+      state.periodStats,
+      state.timePeriod
+    );
+    set({ failureAlert: alert });
+  },
+
+  updatePeriodStats: () => {
+    const state = get();
+    const stats = calculatePeriodStats(state.records);
+    const curve = generatePersonalizedCurve(state.records, state.timePeriod);
+    set({
+      periodStats: stats,
+      personalizedCurve: curve,
+    });
   },
 }));

@@ -36,6 +36,36 @@ export interface PredictionRecord {
   actualSeconds: number | null;
   suggestion: Suggestion;
   timestamp: number;
+  isManualInput?: boolean;
+}
+
+export interface PeriodStats {
+  timePeriod: TimePeriod;
+  avgWaitTime: number;
+  maxWaitTime: number;
+  minWaitTime: number;
+  count: number;
+  variance: number;
+}
+
+export interface FailureAlert {
+  isActive: boolean;
+  message: string;
+  thresholdExceeded: number;
+  predictedTime: number;
+  actualTime: number;
+}
+
+export interface LearningModeState {
+  isEnabled: boolean;
+  manualInputSeconds: number;
+  showManualInput: boolean;
+}
+
+export interface PersonalizedCurveData {
+  timePeriod: TimePeriod;
+  dataPoints: { floorDiff: number; avgWaitTime: number }[];
+  trendLine: { slope: number; intercept: number };
 }
 
 export interface AlgorithmWeights {
