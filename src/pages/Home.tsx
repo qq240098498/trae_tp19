@@ -28,6 +28,10 @@ import {
   Layers,
   RefreshCw,
   Filter,
+  ShieldAlert,
+  Activity,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import { usePredictionStore } from '@/hooks/usePredictionStore';
 import {
@@ -70,11 +74,19 @@ export default function Home() {
     updateFailureAlert,
     setStatsFilter,
     resetStatsFilter,
+    anomalyReport,
+    updateAnomalyReport,
   } = usePredictionStore();
 
   useEffect(() => {
     loadFromStorage();
   }, []);
+
+  useEffect(() => {
+    if (records.length > 0) {
+      updateAnomalyReport();
+    }
+  }, [records.length, updateAnomalyReport]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -1051,6 +1063,184 @@ export default function Home() {
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {records.filter((r) => r.actualSeconds !== null).length >= 3 && (
+          <div className="glass-card p-6 mt-6">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <ShieldAlert className={clsx(
+                  'w-6 h-6',
+                  anomalyReport.isElevatorAnomalous ? 'text-red-400' : 'text-ember'
+                )} />
+                <h2 className="text-xl font-display font-semibold text-slate-100">
+                  电梯异常上报
+                </h2>
+              </div>
+              <button
+                onClick={updateAnomalyReport}
+                className="flex items-center gap-1 text-sm text-slate-400 hover:text-ember transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                刷新
+              </button>
+            </div>
+
+            <div className={clsx(
+              'rounded-xl p-5 mb-5 border',
+              anomalyReport.severity === 'critical' && 'bg-red-500/10 border-red-500/30',
+              anomalyReport.severity === 'high' && 'bg-orange-500/10 border-orange-500/30',
+              anomalyReport.severity === 'medium' && 'bg-yellow-500/10 border-yellow-500/30',
+              anomalyReport.severity === 'low' && 'bg-mint/10 border-mint/30'
+            )}>
+              <div className="flex items-start gap-3">
+                {anomalyReport.isElevatorAnomalous ? (
+                  <AlertCircle className={clsx(
+                    'w-6 h-6 mt-0.5 shrink-0',
+                    anomalyReport.severity === 'critical' && 'text-red-400',
+                    anomalyReport.severity === 'high' && 'text-orange-400'
+                  )} />
+                ) : (
+                  <Activity className={clsx(
+                    'w-6 h-6 mt-0.5 shrink-0',
+                    anomalyReport.severity === 'medium' ? 'text-yellow-400' : 'text-mint'
+                  )} />
+                )}
+                <div className="flex-1">
+                  <p className={clsx(
+                    'font-semibold text-base mb-1',
+                    anomalyReport.severity === 'critical' && 'text-red-400',
+                    anomalyReport.severity === 'high' && 'text-orange-400',
+                    anomalyReport.severity === 'medium' && 'text-yellow-400',
+                    anomalyReport.severity === 'low' && 'text-mint'
+                  )}>
+                    {anomalyReport.message}
+                  </p>
+                  <p className="text-sm text-slate-400">
+                    {anomalyReport.recommendation}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+              <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                <div className={clsx(
+                  'text-3xl font-display font-bold',
+                  anomalyReport.isElevatorAnomalous ? 'text-red-400' : 'text-mint'
+                )}>
+                  {anomalyReport.anomalyRate}%
+                </div>
+                <div className="text-sm text-slate-400 mt-1">异常率</div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                <div className="text-3xl font-display font-bold text-ember-light">
+                  {anomalyReport.anomalyCount}/{anomalyReport.totalRecords}
+                </div>
+                <div className="text-sm text-slate-400 mt-1">异常/总记录</div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                <div className={clsx(
+                  'text-3xl font-display font-bold',
+                  anomalyReport.avgDeviationPercent > 80 ? 'text-coral' : 'text-ember-light'
+                )}>
+                  {anomalyReport.avgDeviationPercent}%
+                </div>
+                <div className="text-sm text-slate-400 mt-1">平均偏差</div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                <div className={clsx(
+                  'text-3xl font-display font-bold',
+                  anomalyReport.maxDeviationPercent > 100 ? 'text-red-400' : 'text-coral'
+                )}>
+                  {anomalyReport.maxDeviationPercent}%
+                </div>
+                <div className="text-sm text-slate-400 mt-1">最大偏差</div>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm text-slate-400">异常严重度</span>
+              </div>
+              <div className="flex items-center gap-3">
+                {(['low', 'medium', 'high', 'critical'] as const).map((level) => {
+                  const labels = { low: '正常', medium: '轻度', high: '严重', critical: '危急' };
+                  const colors = {
+                    low: 'bg-mint border-mint',
+                    medium: 'bg-yellow-400 border-yellow-400',
+                    high: 'bg-orange-400 border-orange-400',
+                    critical: 'bg-red-400 border-red-400',
+                  };
+                  const isActive = anomalyReport.severity === level;
+                  return (
+                    <div
+                      key={level}
+                      className={clsx(
+                        'flex-1 rounded-lg p-2 text-center text-sm font-semibold border transition-all',
+                        isActive
+                          ? `${colors[level]} text-slate-900`
+                          : 'bg-slate-800/30 border-slate-700/50 text-slate-500'
+                      )}
+                    >
+                      {labels[level]}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {anomalyReport.recentAnomalies.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="w-4 h-4 text-ember-light" />
+                  <span className="text-sm text-slate-400">近期异常记录</span>
+                </div>
+                <div className="space-y-2">
+                  {anomalyReport.recentAnomalies.slice(0, 5).map((anomaly) => (
+                    <div
+                      key={anomaly.id}
+                      className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Building2 className="w-4 h-4 text-slate-400" />
+                        <span className="text-sm text-slate-300">
+                          {anomaly.currentFloor}F
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {TIME_PERIOD_LABELS[anomaly.timePeriod]}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="text-slate-400">预测</span>
+                          <span className="text-ember-light font-semibold">{anomaly.predictedSeconds}s</span>
+                          <span className="text-slate-500">→</span>
+                          <span className="text-slate-400">实际</span>
+                          <span className="text-coral font-semibold">{anomaly.actualSeconds}s</span>
+                        </div>
+                        <span className={clsx(
+                          'text-xs font-semibold px-2 py-0.5 rounded-full',
+                          anomaly.deviationPercent >= 100
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-orange-500/20 text-orange-400'
+                        )}>
+                          +{anomaly.deviationPercent}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {anomalyReport.lastChecked > 0 && (
+              <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
+                <Info className="w-3 h-3" />
+                <span>上次检测: {new Date(anomalyReport.lastChecked).toLocaleString('zh-CN')}</span>
+              </div>
+            )}
           </div>
         )}
 

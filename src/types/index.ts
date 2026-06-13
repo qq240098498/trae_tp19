@@ -56,6 +56,32 @@ export interface FailureAlert {
   actualTime: number;
 }
 
+export type AnomalySeverity = "low" | "medium" | "high" | "critical";
+
+export interface AnomalyRecord {
+  id: string;
+  predictedSeconds: number;
+  actualSeconds: number;
+  deviationPercent: number;
+  timestamp: number;
+  timePeriod: TimePeriod;
+  currentFloor: number;
+}
+
+export interface ElevatorAnomalyReport {
+  isElevatorAnomalous: boolean;
+  severity: AnomalySeverity;
+  anomalyCount: number;
+  totalRecords: number;
+  anomalyRate: number;
+  avgDeviationPercent: number;
+  maxDeviationPercent: number;
+  recentAnomalies: AnomalyRecord[];
+  message: string;
+  recommendation: string;
+  lastChecked: number;
+}
+
 export interface LearningModeState {
   isEnabled: boolean;
   manualInputSeconds: number;
@@ -175,4 +201,5 @@ export const TIME_PERIOD_FILTER_LABELS: Record<TimePeriod | "all", string> = {
 export const STORAGE_KEYS = {
   RECORDS: "elevator_prediction_records",
   WEIGHTS: "elevator_algorithm_weights",
+  ANOMALY_REPORT: "elevator_anomaly_report",
 };

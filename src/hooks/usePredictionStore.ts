@@ -9,6 +9,7 @@ import type {
   PersonalizedCurveData,
   LearningModeState,
   StatsFilter,
+  ElevatorAnomalyReport,
 } from '@/types';
 import {
   STORAGE_KEYS,
@@ -25,6 +26,7 @@ import {
   detectFailure,
   generatePersonalizedCurve,
   predictWithPersonalizedCurve,
+  detectElevatorAnomaly,
 } from '@/utils/predictor';
 
 interface TimerState {
@@ -48,6 +50,7 @@ interface PredictionState {
   personalizedCurve: PersonalizedCurveData;
   hasSavedActualTime: boolean;
   statsFilter: StatsFilter;
+  anomalyReport: ElevatorAnomalyReport;
   
   setCurrentFloor: (floor: number) => void;
   setTotalFloors: (floors: number) => void;
@@ -68,6 +71,7 @@ interface PredictionState {
   
   setStatsFilter: (filter: Partial<StatsFilter>) => void;
   resetStatsFilter: () => void;
+  updateAnomalyReport: () => void;
 }
 
 export const usePredictionStore = create<PredictionState>((set, get) => ({
@@ -103,6 +107,19 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
   },
   hasSavedActualTime: false,
   statsFilter: { ...DEFAULT_STATS_FILTER },
+  anomalyReport: {
+    isElevatorAnomalous: false,
+    severity: 'low',
+    anomalyCount: 0,
+    totalRecords: 0,
+    anomalyRate: 0,
+    avgDeviationPercent: 0,
+    maxDeviationPercent: 0,
+    recentAnomalies: [],
+    message: '数据不足，无法判断电梯是否异常',
+    recommendation: '请继续记录等待时间以获取更准确的分析',
+    lastChecked: 0,
+  },
 
   setCurrentFloor: (floor) => {
     set({ currentFloor: Math.max(1, Math.min(floor, get().totalFloors)) });
@@ -243,17 +260,20 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     });
     get()._saveToStorage();
     get().updatePeriodStats();
+    get().updateAnomalyReport();
   },
 
   clearHistory: () => {
     set({ records: [] });
     localStorage.removeItem(STORAGE_KEYS.RECORDS);
+    get().updateAnomalyReport();
   },
 
   loadFromStorage: () => {
     try {
       const recordsJson = localStorage.getItem(STORAGE_KEYS.RECORDS);
       const weightsJson = localStorage.getItem(STORAGE_KEYS.WEIGHTS);
+      const anomalyJson = localStorage.getItem(STORAGE_KEYS.ANOMALY_REPORT);
 
       if (recordsJson) {
         const records = JSON.parse(recordsJson) as PredictionRecord[];
@@ -263,6 +283,13 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       if (weightsJson) {
         const weights = JSON.parse(weightsJson) as AlgorithmWeights;
         set({ weights });
+      }
+
+      if (anomalyJson) {
+        const report = JSON.parse(anomalyJson) as ElevatorAnomalyReport;
+        set({ anomalyReport: report });
+      } else {
+        get().updateAnomalyReport();
       }
     } catch (error) {
       console.error('Failed to load from storage:', error);
@@ -331,6 +358,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     });
     get()._saveToStorage();
     get().updatePeriodStats();
+    get().updateAnomalyReport();
   },
 
   updateFailureAlert: () => {
@@ -376,5 +404,16 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
 
   resetStatsFilter: () => {
     set({ statsFilter: { ...DEFAULT_STATS_FILTER } });
+  },
+
+  updateAnomalyReport: () => {
+    const state = get();
+    const report = detectElevatorAnomaly(state.records);
+    set({ anomalyReport: report });
+    try {
+      localStorage.setItem(STORAGE_KEYS.ANOMALY_REPORT, JSON.stringify(report));
+    } catch (error) {
+      console.error('Failed to save anomaly report:', error);
+    }
   },
 }));

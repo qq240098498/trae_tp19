@@ -12,6 +12,9 @@ import type {
   AccuracyStats,
   StatsFilter,
   DayType,
+  ElevatorAnomalyReport,
+  AnomalyRecord,
+  AnomalySeverity,
 } from "@/types";
 import { DEFAULT_WEIGHTS } from "@/types";
 
@@ -525,6 +528,112 @@ export function calculateFilteredAccuracyStats(
 ): AccuracyStats {
   const filtered = filterRecords(records, filter);
   return calculateAccuracyStats(filtered);
+}
+
+export function detectElevatorAnomaly(
+  records: PredictionRecord[],
+  deviationThreshold: number = 50
+): ElevatorAnomalyReport {
+  const validRecords = records.filter(
+    (r) => r.actualSeconds !== null && r.predictedSeconds > 0
+  );
+
+  const emptyReport: ElevatorAnomalyReport = {
+    isElevatorAnomalous: false,
+    severity: "low",
+    anomalyCount: 0,
+    totalRecords: validRecords.length,
+    anomalyRate: 0,
+    avgDeviationPercent: 0,
+    maxDeviationPercent: 0,
+    recentAnomalies: [],
+    message: "数据不足，无法判断电梯是否异常",
+    recommendation: "请继续记录等待时间以获取更准确的分析",
+    lastChecked: Date.now(),
+  };
+
+  if (validRecords.length < 3) {
+    return emptyReport;
+  }
+
+  const anomalyRecords: AnomalyRecord[] = validRecords
+    .map((r) => {
+      const deviation = Math.abs(r.actualSeconds! - r.predictedSeconds);
+      const deviationPercent = Math.round((deviation / r.predictedSeconds) * 100);
+      return {
+        id: r.id,
+        predictedSeconds: r.predictedSeconds,
+        actualSeconds: r.actualSeconds!,
+        deviationPercent,
+        timestamp: r.timestamp,
+        timePeriod: r.timePeriod,
+        currentFloor: r.currentFloor,
+      };
+    })
+    .filter((a) => a.deviationPercent >= deviationThreshold);
+
+  const recentAnomalies = anomalyRecords.slice(0, 10);
+
+  const anomalyRate = validRecords.length > 0
+    ? anomalyRecords.length / validRecords.length
+    : 0;
+
+  const avgDeviationPercent =
+    anomalyRecords.length > 0
+      ? Math.round(
+          anomalyRecords.reduce((sum, a) => sum + a.deviationPercent, 0) /
+            anomalyRecords.length
+        )
+      : 0;
+
+  const maxDeviationPercent =
+    anomalyRecords.length > 0
+      ? Math.max(...anomalyRecords.map((a) => a.deviationPercent))
+      : 0;
+
+  const recentValid = validRecords.slice(0, 5);
+  const recentAnomalyCount = recentValid.filter((r) => {
+    const dev = Math.abs(r.actualSeconds! - r.predictedSeconds);
+    const devPct = (dev / r.predictedSeconds) * 100;
+    return devPct >= deviationThreshold;
+  }).length;
+  const recentAnomalyRate = recentValid.length > 0 ? recentAnomalyCount / recentValid.length : 0;
+
+  let severity: AnomalySeverity = "low";
+  let isElevatorAnomalous = false;
+  let message = "电梯运行正常，预测与实际等待时间基本吻合";
+  let recommendation = "继续记录等待时间以持续监控电梯状态";
+
+  if (anomalyRate >= 0.6 || recentAnomalyRate >= 0.8) {
+    severity = "critical";
+    isElevatorAnomalous = true;
+    message = "电梯存在严重异常！实际等待时间频繁严重偏离预测值";
+    recommendation = "建议立即向物业报修，电梯可能存在调度故障或机械问题";
+  } else if (anomalyRate >= 0.4 || recentAnomalyRate >= 0.6) {
+    severity = "high";
+    isElevatorAnomalous = true;
+    message = "电梯可能存在异常，多次出现预测时间与实际等待时间严重不符";
+    recommendation = "建议向物业反映情况，关注电梯运行状态";
+  } else if (anomalyRate >= 0.2 || recentAnomalyRate >= 0.4) {
+    severity = "medium";
+    isElevatorAnomalous = false;
+    message = "电梯偶尔出现等待时间异常，需持续关注";
+    recommendation = "建议多观察并记录，如持续异常请向物业反映";
+  }
+
+  return {
+    isElevatorAnomalous,
+    severity,
+    anomalyCount: anomalyRecords.length,
+    totalRecords: validRecords.length,
+    anomalyRate: Math.round(anomalyRate * 100),
+    avgDeviationPercent,
+    maxDeviationPercent,
+    recentAnomalies,
+    message,
+    recommendation,
+    lastChecked: Date.now(),
+  };
 }
 
 export function formatDate(date: Date): string {
