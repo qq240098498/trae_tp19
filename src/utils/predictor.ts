@@ -15,6 +15,7 @@ import type {
   ElevatorAnomalyReport,
   AnomalyRecord,
   AnomalySeverity,
+  AnomalyHandling,
 } from "@/types";
 import { DEFAULT_WEIGHTS } from "@/types";
 
@@ -532,11 +533,15 @@ export function calculateFilteredAccuracyStats(
 
 export function detectElevatorAnomaly(
   records: PredictionRecord[],
-  deviationThreshold: number = 50
+  deviationThreshold: number = 50,
+  existingHandlings: AnomalyHandling[] = []
 ): ElevatorAnomalyReport {
   const validRecords = records.filter(
     (r) => r.actualSeconds !== null && r.predictedSeconds > 0
   );
+
+  const handlingMap = new Map<string, AnomalyHandling>();
+  existingHandlings.forEach((h) => handlingMap.set(h.anomalyRecordId, h));
 
   const emptyReport: ElevatorAnomalyReport = {
     isElevatorAnomalous: false,
@@ -547,6 +552,8 @@ export function detectElevatorAnomaly(
     avgDeviationPercent: 0,
     maxDeviationPercent: 0,
     recentAnomalies: [],
+    handledAnomalies: [],
+    unhandledAnomalyCount: 0,
     message: "数据不足，无法判断电梯是否异常",
     recommendation: "请继续记录等待时间以获取更准确的分析",
     lastChecked: Date.now(),
@@ -556,10 +563,11 @@ export function detectElevatorAnomaly(
     return emptyReport;
   }
 
-  const anomalyRecords: AnomalyRecord[] = validRecords
+  const allAnomalyRecords: AnomalyRecord[] = validRecords
     .map((r) => {
       const deviation = Math.abs(r.actualSeconds! - r.predictedSeconds);
       const deviationPercent = Math.round((deviation / r.predictedSeconds) * 100);
+      const handling = handlingMap.get(r.id);
       return {
         id: r.id,
         predictedSeconds: r.predictedSeconds,
@@ -568,36 +576,49 @@ export function detectElevatorAnomaly(
         timestamp: r.timestamp,
         timePeriod: r.timePeriod,
         currentFloor: r.currentFloor,
+        handling,
       };
     })
     .filter((a) => a.deviationPercent >= deviationThreshold);
 
-  const recentAnomalies = anomalyRecords.slice(0, 10);
+  const effectiveAnomalies = allAnomalyRecords.filter(
+    (a) => !a.handling || a.handling.handlingType !== "false_positive"
+  );
+
+  const handledAnomalies = allAnomalyRecords.filter(
+    (a) => a.handling && a.handling.handlingType !== "false_positive"
+  );
+
+  const recentAnomalies = allAnomalyRecords.slice(0, 10);
 
   const anomalyRate = validRecords.length > 0
-    ? anomalyRecords.length / validRecords.length
+    ? effectiveAnomalies.length / validRecords.length
     : 0;
 
   const avgDeviationPercent =
-    anomalyRecords.length > 0
+    effectiveAnomalies.length > 0
       ? Math.round(
-          anomalyRecords.reduce((sum, a) => sum + a.deviationPercent, 0) /
-            anomalyRecords.length
+          effectiveAnomalies.reduce((sum, a) => sum + a.deviationPercent, 0) /
+            effectiveAnomalies.length
         )
       : 0;
 
   const maxDeviationPercent =
-    anomalyRecords.length > 0
-      ? Math.max(...anomalyRecords.map((a) => a.deviationPercent))
+    effectiveAnomalies.length > 0
+      ? Math.max(...effectiveAnomalies.map((a) => a.deviationPercent))
       : 0;
 
   const recentValid = validRecords.slice(0, 5);
   const recentAnomalyCount = recentValid.filter((r) => {
+    const handling = handlingMap.get(r.id);
+    if (handling && handling.handlingType === "false_positive") return false;
     const dev = Math.abs(r.actualSeconds! - r.predictedSeconds);
     const devPct = (dev / r.predictedSeconds) * 100;
     return devPct >= deviationThreshold;
   }).length;
   const recentAnomalyRate = recentValid.length > 0 ? recentAnomalyCount / recentValid.length : 0;
+
+  const unhandledAnomalyCount = allAnomalyRecords.filter((a) => !a.handling).length;
 
   let severity: AnomalySeverity = "low";
   let isElevatorAnomalous = false;
@@ -624,12 +645,14 @@ export function detectElevatorAnomaly(
   return {
     isElevatorAnomalous,
     severity,
-    anomalyCount: anomalyRecords.length,
+    anomalyCount: effectiveAnomalies.length,
     totalRecords: validRecords.length,
     anomalyRate: Math.round(anomalyRate * 100),
     avgDeviationPercent,
     maxDeviationPercent,
     recentAnomalies,
+    handledAnomalies,
+    unhandledAnomalyCount,
     message,
     recommendation,
     lastChecked: Date.now(),

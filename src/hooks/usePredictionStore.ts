@@ -10,6 +10,8 @@ import type {
   LearningModeState,
   StatsFilter,
   ElevatorAnomalyReport,
+  AnomalyHandling,
+  AnomalyHandlingType,
 } from '@/types';
 import {
   STORAGE_KEYS,
@@ -51,6 +53,7 @@ interface PredictionState {
   hasSavedActualTime: boolean;
   statsFilter: StatsFilter;
   anomalyReport: ElevatorAnomalyReport;
+  anomalyHandlings: AnomalyHandling[];
   
   setCurrentFloor: (floor: number) => void;
   setTotalFloors: (floors: number) => void;
@@ -72,6 +75,7 @@ interface PredictionState {
   setStatsFilter: (filter: Partial<StatsFilter>) => void;
   resetStatsFilter: () => void;
   updateAnomalyReport: () => void;
+  handleAnomaly: (anomalyRecordId: string, handlingType: AnomalyHandlingType, note?: string) => void;
 }
 
 export const usePredictionStore = create<PredictionState>((set, get) => ({
@@ -116,10 +120,13 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     avgDeviationPercent: 0,
     maxDeviationPercent: 0,
     recentAnomalies: [],
+    handledAnomalies: [],
+    unhandledAnomalyCount: 0,
     message: '数据不足，无法判断电梯是否异常',
     recommendation: '请继续记录等待时间以获取更准确的分析',
     lastChecked: 0,
   },
+  anomalyHandlings: [],
 
   setCurrentFloor: (floor) => {
     set({ currentFloor: Math.max(1, Math.min(floor, get().totalFloors)) });
@@ -264,8 +271,9 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
   },
 
   clearHistory: () => {
-    set({ records: [] });
+    set({ records: [], anomalyHandlings: [] });
     localStorage.removeItem(STORAGE_KEYS.RECORDS);
+    localStorage.removeItem(STORAGE_KEYS.ANOMALY_HANDLINGS);
     get().updateAnomalyReport();
   },
 
@@ -274,6 +282,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       const recordsJson = localStorage.getItem(STORAGE_KEYS.RECORDS);
       const weightsJson = localStorage.getItem(STORAGE_KEYS.WEIGHTS);
       const anomalyJson = localStorage.getItem(STORAGE_KEYS.ANOMALY_REPORT);
+      const handlingsJson = localStorage.getItem(STORAGE_KEYS.ANOMALY_HANDLINGS);
 
       if (recordsJson) {
         const records = JSON.parse(recordsJson) as PredictionRecord[];
@@ -283,6 +292,11 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       if (weightsJson) {
         const weights = JSON.parse(weightsJson) as AlgorithmWeights;
         set({ weights });
+      }
+
+      if (handlingsJson) {
+        const handlings = JSON.parse(handlingsJson) as AnomalyHandling[];
+        set({ anomalyHandlings: handlings });
       }
 
       if (anomalyJson) {
@@ -408,12 +422,45 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
 
   updateAnomalyReport: () => {
     const state = get();
-    const report = detectElevatorAnomaly(state.records);
+    const report = detectElevatorAnomaly(state.records, 50, state.anomalyHandlings);
     set({ anomalyReport: report });
     try {
       localStorage.setItem(STORAGE_KEYS.ANOMALY_REPORT, JSON.stringify(report));
     } catch (error) {
       console.error('Failed to save anomaly report:', error);
     }
+  },
+
+  handleAnomaly: (anomalyRecordId, handlingType, note = '') => {
+    const state = get();
+    const existing = state.anomalyHandlings.find(
+      (h) => h.anomalyRecordId === anomalyRecordId
+    );
+    if (existing) {
+      const updated = state.anomalyHandlings.map((h) =>
+        h.anomalyRecordId === anomalyRecordId
+          ? { ...h, handlingType, note, handledAt: Date.now() }
+          : h
+      );
+      set({ anomalyHandlings: updated });
+    } else {
+      const handling: AnomalyHandling = {
+        id: generateId(),
+        anomalyRecordId,
+        handlingType,
+        note,
+        handledAt: Date.now(),
+      };
+      set({ anomalyHandlings: [handling, ...state.anomalyHandlings] });
+    }
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.ANOMALY_HANDLINGS,
+        JSON.stringify(get().anomalyHandlings)
+      );
+    } catch (error) {
+      console.error('Failed to save anomaly handlings:', error);
+    }
+    get().updateAnomalyReport();
   },
 }));

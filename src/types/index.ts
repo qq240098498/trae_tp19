@@ -58,6 +58,30 @@ export interface FailureAlert {
 
 export type AnomalySeverity = "low" | "medium" | "high" | "critical";
 
+export type AnomalyHandlingType = "false_positive" | "acknowledged" | "reported" | "resolved";
+
+export interface AnomalyHandling {
+  id: string;
+  anomalyRecordId: string;
+  handlingType: AnomalyHandlingType;
+  note: string;
+  handledAt: number;
+}
+
+export const ANOMALY_HANDLING_LABELS: Record<AnomalyHandlingType, string> = {
+  false_positive: "误报",
+  acknowledged: "已知晓",
+  reported: "已报修",
+  resolved: "已解决",
+};
+
+export const ANOMALY_HANDLING_DESCRIPTIONS: Record<AnomalyHandlingType, string> = {
+  false_positive: "实际为正常情况，标记为误报后将不再计入异常率统计",
+  acknowledged: "已了解异常情况，暂不采取进一步行动",
+  reported: "已向物业或维修部门报修，等待处理",
+  resolved: "电梯异常问题已修复或恢复正常",
+};
+
 export interface AnomalyRecord {
   id: string;
   predictedSeconds: number;
@@ -66,6 +90,7 @@ export interface AnomalyRecord {
   timestamp: number;
   timePeriod: TimePeriod;
   currentFloor: number;
+  handling?: AnomalyHandling;
 }
 
 export interface ElevatorAnomalyReport {
@@ -77,6 +102,8 @@ export interface ElevatorAnomalyReport {
   avgDeviationPercent: number;
   maxDeviationPercent: number;
   recentAnomalies: AnomalyRecord[];
+  handledAnomalies: AnomalyRecord[];
+  unhandledAnomalyCount: number;
   message: string;
   recommendation: string;
   lastChecked: number;
@@ -202,4 +229,5 @@ export const STORAGE_KEYS = {
   RECORDS: "elevator_prediction_records",
   WEIGHTS: "elevator_algorithm_weights",
   ANOMALY_REPORT: "elevator_anomaly_report",
+  ANOMALY_HANDLINGS: "elevator_anomaly_handlings",
 };

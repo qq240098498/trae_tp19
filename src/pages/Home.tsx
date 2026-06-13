@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Sunrise,
   Sun,
@@ -32,6 +32,11 @@ import {
   Activity,
   AlertCircle,
   Info,
+  XCircle,
+  Eye,
+  Wrench,
+  CheckCircle2,
+  MessageSquare,
 } from 'lucide-react';
 import { usePredictionStore } from '@/hooks/usePredictionStore';
 import {
@@ -41,9 +46,269 @@ import {
   DAY_TYPE_LABELS,
   TIME_PERIOD_FILTER_LABELS,
   DayType,
+  ANOMALY_HANDLING_LABELS,
+  ANOMALY_HANDLING_DESCRIPTIONS,
+  AnomalyHandlingType,
 } from '@/types';
 import { formatTime, calculateAccuracy, getAccuracyLevel, calculateFilteredFloorWaitStats, calculateFilteredAccuracyStats } from '@/utils/predictor';
 import { clsx } from 'clsx';
+import type { AnomalyRecord } from '@/types';
+
+const HANDLING_TYPE_ICONS: Record<AnomalyHandlingType, typeof XCircle> = {
+  false_positive: XCircle,
+  acknowledged: Eye,
+  reported: Wrench,
+  resolved: CheckCircle2,
+};
+
+const HANDLING_TYPE_COLORS: Record<AnomalyHandlingType, string> = {
+  false_positive: 'text-slate-400 bg-slate-500/20 border-slate-500/30',
+  acknowledged: 'text-blue-400 bg-blue-500/20 border-blue-500/30',
+  reported: 'text-orange-400 bg-orange-500/20 border-orange-500/30',
+  resolved: 'text-mint bg-mint/20 border-mint/30',
+};
+
+function HandlingBadge({ handlingType }: { handlingType: AnomalyHandlingType }) {
+  const Icon = HANDLING_TYPE_ICONS[handlingType];
+  return (
+    <span className={clsx(
+      'inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border',
+      HANDLING_TYPE_COLORS[handlingType]
+    )}>
+      <Icon className="w-3 h-3" />
+      {ANOMALY_HANDLING_LABELS[handlingType]}
+    </span>
+  );
+}
+
+function HandledAnomalyItem({
+  anomaly,
+  handleAnomaly,
+}: {
+  anomaly: AnomalyRecord;
+  handleAnomaly: (id: string, type: AnomalyHandlingType, note?: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Building2 className="w-4 h-4 text-slate-500" />
+          <span className="text-sm text-slate-400">{anomaly.currentFloor}F</span>
+          <span className="text-xs text-slate-500">{TIME_PERIOD_LABELS[anomaly.timePeriod]}</span>
+          <span className="text-sm text-slate-500">
+            预测 {anomaly.predictedSeconds}s → 实际 {anomaly.actualSeconds}s
+          </span>
+          <span className="text-xs text-slate-600">+{anomaly.deviationPercent}%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {anomaly.handling && <HandlingBadge handlingType={anomaly.handling.handlingType} />}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            {expanded ? '收起' : '详情'}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="mt-3 pl-7 space-y-2">
+          {anomaly.handling && (
+            <>
+              <div className="text-xs text-slate-400">
+                处理方式: <span className="font-semibold">{ANOMALY_HANDLING_LABELS[anomaly.handling.handlingType]}</span>
+              </div>
+              <div className="text-xs text-slate-400">
+                说明: {ANOMALY_HANDLING_DESCRIPTIONS[anomaly.handling.handlingType]}
+              </div>
+              {anomaly.handling.note && (
+                <div className="text-xs text-slate-400">
+                  备注: {anomaly.handling.note}
+                </div>
+              )}
+              <div className="text-xs text-slate-500">
+                处理时间: {new Date(anomaly.handling.handledAt).toLocaleString('zh-CN')}
+              </div>
+            </>
+          )}
+          <div className="pt-2 border-t border-slate-700/30">
+            <span className="text-xs text-slate-500 mr-2">更改处理:</span>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {(['false_positive', 'acknowledged', 'reported', 'resolved'] as const)
+                .filter((t) => t !== anomaly.handling?.handlingType)
+                .map((type) => {
+                  const Icon = HANDLING_TYPE_ICONS[type];
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => handleAnomaly(anomaly.id, type)}
+                      className={clsx(
+                        'inline-flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors',
+                        HANDLING_TYPE_COLORS[type],
+                        'hover:opacity-80'
+                      )}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {ANOMALY_HANDLING_LABELS[type]}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnomalyList({
+  anomalies,
+  handleAnomaly,
+}: {
+  anomalies: AnomalyRecord[];
+  handleAnomaly: (id: string, type: AnomalyHandlingType, note?: string) => void;
+}) {
+  const [handlingId, setHandlingId] = useState<string | null>(null);
+  const [handlingNote, setHandlingNote] = useState('');
+
+  const unhandled = anomalies.filter((a) => !a.handling);
+  const handled = anomalies.filter((a) => a.handling);
+
+  return (
+    <div>
+      {unhandled.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-4 h-4 text-ember-light" />
+            <span className="text-sm text-slate-400">待处理异常</span>
+            <span className="text-xs text-slate-500">({unhandled.length}条)</span>
+          </div>
+          <div className="space-y-2 mb-4">
+            {unhandled.slice(0, 5).map((anomaly) => (
+              <div
+                key={anomaly.id}
+                className={clsx(
+                  'bg-slate-800/50 rounded-lg p-3 border',
+                  handlingId === anomaly.id
+                    ? 'border-ember/50'
+                    : 'border-slate-700/50'
+                )}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <Building2 className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-300">{anomaly.currentFloor}F</span>
+                    <span className="text-xs text-slate-500">{TIME_PERIOD_LABELS[anomaly.timePeriod]}</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-slate-400">预测</span>
+                      <span className="text-ember-light font-semibold">{anomaly.predictedSeconds}s</span>
+                      <span className="text-slate-500">→</span>
+                      <span className="text-slate-400">实际</span>
+                      <span className="text-coral font-semibold">{anomaly.actualSeconds}s</span>
+                    </div>
+                    <span className={clsx(
+                      'text-xs font-semibold px-2 py-0.5 rounded-full',
+                      anomaly.deviationPercent >= 100
+                        ? 'bg-red-500/20 text-red-400'
+                        : 'bg-orange-500/20 text-orange-400'
+                    )}>
+                      +{anomaly.deviationPercent}%
+                    </span>
+                  </div>
+                </div>
+
+                {handlingId === anomaly.id ? (
+                  <div className="mt-2 pt-2 border-t border-slate-700/50">
+                    <div className="text-xs text-slate-400 mb-2">选择处理方式:</div>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {(['false_positive', 'acknowledged', 'reported', 'resolved'] as const).map((type) => {
+                        const Icon = HANDLING_TYPE_ICONS[type];
+                        return (
+                          <button
+                            key={type}
+                            onClick={() => {
+                              handleAnomaly(anomaly.id, type, handlingNote);
+                              setHandlingId(null);
+                              setHandlingNote('');
+                            }}
+                            className={clsx(
+                              'inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors',
+                              HANDLING_TYPE_COLORS[type],
+                              'hover:opacity-80'
+                            )}
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                            <span className="font-semibold">{ANOMALY_HANDLING_LABELS[type]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <MessageSquare className="w-3 h-3 text-slate-500" />
+                      <input
+                        type="text"
+                        value={handlingNote}
+                        onChange={(e) => setHandlingNote(e.target.value)}
+                        placeholder="添加备注（可选）"
+                        className="flex-1 bg-slate-900/50 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-ember/50 transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-1 mb-2">
+                      {(['false_positive', 'acknowledged', 'reported', 'resolved'] as const).map((type) => (
+                        <div key={type} className="text-xs text-slate-500">
+                          <span className="font-semibold text-slate-400">{ANOMALY_HANDLING_LABELS[type]}:</span> {ANOMALY_HANDLING_DESCRIPTIONS[type]}
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setHandlingId(null);
+                        setHandlingNote('');
+                      }}
+                      className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setHandlingId(anomaly.id)}
+                    className="text-xs text-ember-light hover:text-ember transition-colors flex items-center gap-1"
+                  >
+                    <Wrench className="w-3 h-3" />
+                    处理此异常
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {handled.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle2 className="w-4 h-4 text-slate-400" />
+            <span className="text-sm text-slate-400">已处理异常</span>
+            <span className="text-xs text-slate-500">({handled.length}条)</span>
+          </div>
+          <div className="space-y-2">
+            {handled.map((anomaly) => (
+              <HandledAnomalyItem
+                key={anomaly.id}
+                anomaly={anomaly}
+                handleAnomaly={handleAnomaly}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
   const {
@@ -76,6 +341,7 @@ export default function Home() {
     resetStatsFilter,
     anomalyReport,
     updateAnomalyReport,
+    handleAnomaly,
   } = usePredictionStore();
 
   useEffect(() => {
@@ -1077,6 +1343,11 @@ export default function Home() {
                 <h2 className="text-xl font-display font-semibold text-slate-100">
                   电梯异常上报
                 </h2>
+                {anomalyReport.unhandledAnomalyCount > 0 && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500/20 text-red-400">
+                    {anomalyReport.unhandledAnomalyCount}条待处理
+                  </span>
+                )}
               </div>
               <button
                 onClick={updateAnomalyReport}
@@ -1124,7 +1395,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-5">
               <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
                 <div className={clsx(
                   'text-3xl font-display font-bold',
@@ -1157,6 +1428,15 @@ export default function Home() {
                   {anomalyReport.maxDeviationPercent}%
                 </div>
                 <div className="text-sm text-slate-400 mt-1">最大偏差</div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
+                <div className={clsx(
+                  'text-3xl font-display font-bold',
+                  anomalyReport.unhandledAnomalyCount > 0 ? 'text-orange-400' : 'text-mint'
+                )}>
+                  {anomalyReport.unhandledAnomalyCount}
+                </div>
+                <div className="text-sm text-slate-400 mt-1">待处理</div>
               </div>
             </div>
 
@@ -1192,44 +1472,26 @@ export default function Home() {
             </div>
 
             {anomalyReport.recentAnomalies.length > 0 && (
-              <div>
+              <AnomalyList
+                anomalies={anomalyReport.recentAnomalies}
+                handleAnomaly={handleAnomaly}
+              />
+            )}
+
+            {anomalyReport.handledAnomalies.length > 0 && (
+              <div className="mt-5">
                 <div className="flex items-center gap-2 mb-3">
-                  <AlertTriangle className="w-4 h-4 text-ember-light" />
-                  <span className="text-sm text-slate-400">近期异常记录</span>
+                  <CheckCircle2 className="w-4 h-4 text-slate-400" />
+                  <span className="text-sm text-slate-400">已处理记录</span>
+                  <span className="text-xs text-slate-500">({anomalyReport.handledAnomalies.length}条)</span>
                 </div>
                 <div className="space-y-2">
-                  {anomalyReport.recentAnomalies.slice(0, 5).map((anomaly) => (
-                    <div
+                  {anomalyReport.handledAnomalies.slice(0, 10).map((anomaly) => (
+                    <HandledAnomalyItem
                       key={anomaly.id}
-                      className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50 flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Building2 className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm text-slate-300">
-                          {anomaly.currentFloor}F
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          {TIME_PERIOD_LABELS[anomaly.timePeriod]}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="text-slate-400">预测</span>
-                          <span className="text-ember-light font-semibold">{anomaly.predictedSeconds}s</span>
-                          <span className="text-slate-500">→</span>
-                          <span className="text-slate-400">实际</span>
-                          <span className="text-coral font-semibold">{anomaly.actualSeconds}s</span>
-                        </div>
-                        <span className={clsx(
-                          'text-xs font-semibold px-2 py-0.5 rounded-full',
-                          anomaly.deviationPercent >= 100
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-orange-500/20 text-orange-400'
-                        )}>
-                          +{anomaly.deviationPercent}%
-                        </span>
-                      </div>
-                    </div>
+                      anomaly={anomaly}
+                      handleAnomaly={handleAnomaly}
+                    />
                   ))}
                 </div>
               </div>
