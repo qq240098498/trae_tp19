@@ -131,7 +131,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       timer: {
         isRunning: false,
         startTime: null,
-        elapsedSeconds: 0,
+        elapsedSeconds: state.timer.elapsedSeconds,
         intervalId: null,
       },
     });
