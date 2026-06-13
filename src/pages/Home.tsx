@@ -43,6 +43,7 @@ export default function Home() {
     failureAlert,
     periodStats,
     personalizedCurve,
+    hasSavedActualTime,
     setCurrentFloor,
     setTotalFloors,
     setTimePeriod,
@@ -391,15 +392,17 @@ export default function Home() {
                     <button
                       onClick={handleStartTimer}
                       className="btn-primary flex items-center gap-2"
+                      disabled={hasSavedActualTime}
                     >
                       <Play className="w-5 h-5" />
-                      开始计时
+                      {hasSavedActualTime ? '已保存' : '开始计时'}
                     </button>
                   ) : (
                     <>
                       <button
                         onClick={handleStopTimer}
                         className="btn-danger flex items-center gap-2"
+                        disabled={hasSavedActualTime}
                       >
                         <Square className="w-5 h-5" />
                         停止并保存
@@ -414,7 +417,7 @@ export default function Home() {
                   )}
                 </div>
 
-                {timer.elapsedSeconds > 0 && !timer.isRunning && (
+                {timer.elapsedSeconds > 0 && !timer.isRunning && !hasSavedActualTime && (
                   <button
                     onClick={saveActualTime}
                     className="btn-secondary flex items-center gap-2 mt-3"
@@ -424,7 +427,14 @@ export default function Home() {
                   </button>
                 )}
 
-                {learningMode.isEnabled && currentPrediction && !timer.isRunning && (
+                {hasSavedActualTime && (
+                  <div className="mt-3 flex items-center gap-2 text-mint">
+                    <Check className="w-4 h-4" />
+                    <span className="text-sm font-medium">已保存实际等待时间</span>
+                  </div>
+                )}
+
+                {learningMode.isEnabled && currentPrediction && !timer.isRunning && !hasSavedActualTime && (
                   <div className="mt-5 w-full">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-sm text-slate-400">手动输入实际等待时间</span>

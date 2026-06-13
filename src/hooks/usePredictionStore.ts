@@ -44,6 +44,7 @@ interface PredictionState {
   failureAlert: FailureAlert;
   periodStats: PeriodStats[];
   personalizedCurve: PersonalizedCurveData;
+  hasSavedActualTime: boolean;
   
   setCurrentFloor: (floor: number) => void;
   setTotalFloors: (floors: number) => void;
@@ -94,6 +95,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     dataPoints: [],
     trendLine: { slope: DEFAULT_WEIGHTS.secondsPerFloor, intercept: DEFAULT_WEIGHTS.baseWaitTime },
   },
+  hasSavedActualTime: false,
 
   setCurrentFloor: (floor) => {
     set({ currentFloor: Math.max(1, Math.min(floor, get().totalFloors)) });
@@ -142,6 +144,24 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
       },
       periodStats,
       personalizedCurve,
+      hasSavedActualTime: false,
+      timer: {
+        isRunning: false,
+        startTime: null,
+        elapsedSeconds: 0,
+        intervalId: null,
+      },
+      learningMode: {
+        ...state.learningMode,
+        manualInputSeconds: 0,
+      },
+      failureAlert: {
+        isActive: false,
+        message: '',
+        thresholdExceeded: 0,
+        predictedTime: 0,
+        actualTime: 0,
+      },
     });
   },
 
@@ -186,7 +206,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
 
   saveActualTime: () => {
     const state = get();
-    if (!state.currentPrediction) return;
+    if (!state.currentPrediction || state.hasSavedActualTime) return;
 
     const record: PredictionRecord = {
       id: generateId(),
@@ -200,8 +220,22 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     };
 
     const updatedRecords = [record, ...state.records].slice(0, 50);
-    set({ records: updatedRecords });
+    set({
+      records: updatedRecords,
+      hasSavedActualTime: true,
+      timer: {
+        isRunning: false,
+        startTime: null,
+        elapsedSeconds: 0,
+        intervalId: null,
+      },
+      learningMode: {
+        ...state.learningMode,
+        manualInputSeconds: 0,
+      },
+    });
     get()._saveToStorage();
+    get().updatePeriodStats();
   },
 
   clearHistory: () => {
@@ -258,7 +292,7 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
 
   saveManualTime: () => {
     const state = get();
-    if (!state.currentPrediction) return;
+    if (!state.currentPrediction || state.hasSavedActualTime) return;
 
     const record: PredictionRecord = {
       id: generateId(),
@@ -273,17 +307,23 @@ export const usePredictionStore = create<PredictionState>((set, get) => ({
     };
 
     const updatedRecords = [record, ...state.records].slice(0, 50);
-    set({ records: updatedRecords });
-    get()._saveToStorage();
-    get().updatePeriodStats();
-
-    set((state) => ({
+    set({
+      records: updatedRecords,
+      hasSavedActualTime: true,
+      timer: {
+        isRunning: false,
+        startTime: null,
+        elapsedSeconds: 0,
+        intervalId: null,
+      },
       learningMode: {
         ...state.learningMode,
         manualInputSeconds: 0,
         showManualInput: false,
       },
-    }));
+    });
+    get()._saveToStorage();
+    get().updatePeriodStats();
   },
 
   updateFailureAlert: () => {
